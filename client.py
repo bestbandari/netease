@@ -1,6 +1,6 @@
 #coding=utf-8 
 import threading,sys
-import socket
+import socket, time
 
 HOST = 'localhost'
 PORT = 8888
@@ -10,26 +10,41 @@ addr = (HOST,PORT)
 client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 client.connect(addr)
 
-running = 1
+running = True
 
 
-def send_msg(client):
-    while True:
+def send_msg(client,th):
+    global running
+    while running:
         data = raw_input()
-        if data == 'exit':
+        if data == '$exit':
+            client.send(data)
+            time.sleep(1)
             client.close()
+            running = False
+            th.join(1)
             exit(0)
         
-        client.sendall(data)
+        client.send(data)
 
 def recv_msg(client):
-    while True:
+    global running
+    while running:
         try:
             data = client.recv(1024)
             print(data)
         except:
             client.close()
+            running = False
             exit(0)
 
-threading.Thread(target=send_msg, args=(client,)).start()  
-threading.Thread(target=recv_msg, args=(client,)).start()
+th1 = threading.Thread(target=recv_msg, args=(client,))
+th1.daemon = True
+th1.start()
+
+th2 = threading.Thread(target=send_msg, args=(client,th1))
+th2.daemon = True
+th2.start()
+
+while running:
+    time.sleep(1)

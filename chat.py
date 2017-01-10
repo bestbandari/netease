@@ -1,6 +1,7 @@
 #coding=utf-8
 import socket, select
 import threading,time
+import collections
 
 buf_size = 2048
 
@@ -15,24 +16,30 @@ msg_welcome_room = '欢迎%s来到房间'
 
 msg_cmd_lobby = '-输入$showroom， 获取房间列表\n-输入$enterroom 房间号， 进入房间\n-输入$createroom， 创建新房间'
 
+msg_info_no_room = '目前没有房间'
+
+msg_err_cmd = '输入指令有误: %s'
+msg_err_room_num = '房间号有误'
+
+
 def welcome(client):
     client.settimeout(500)
-    buf = ''
+    name = None
     
-    while 1:
+    while name is None :
         client.send(msg_welcome)
         buf = client.recv(buf_size)
         
         if buf == '1':
             signup(client)
-            return login(client)
+            name = login(client)
             
         elif buf == '2':
-            return login(client)
+            name = login(client)
             
         else:
             client.send(msg_invalid_input)
-
+    return name 
 
 def signup(client):
     pass
@@ -48,7 +55,7 @@ def login(client):
         return username
     else:
         client.send(msg_auth_fail)
-        return welcome(client)
+        return None
         
 def authenticate(username, password):
     if 'netease1' in username  and password == '123':
@@ -56,13 +63,58 @@ def authenticate(username, password):
     return False
 
 
+class user(object):
+    def __init__(self, username, sock, duration):
+        self.username = username
+        self.sock = sock
+        self.duration = duration
+        self.stamp = time.clock()
+        
+    def get_duration(self):
+        return duration + time.clock() - self.stamp
 
+class users(object):        
+    def __init__(self):
+        self.pool = {}
+    
+    def add_user(self, username, sock, duration):
+        self.pool[username] = user(username, sock, duration)
+        
+    def broadcast(self, msg):
+        for user in self.pool.itervalues():
+            user.sock.send(msg)
 
 class unit(object):
+    LOBBY = None
+    USERS = None
+    
     def __init__(self):
         self.name_sock = {}
         self.sock_name = {}
+        self.roomname = ''
         
+        self.cmd = {}
+        self.cmd['chat'] = self.chat
+        self.cmd['chatall'] = self.chatall
+        self.cmd['exit'] = self.exit
+        
+        self.run()
+
+    def chat(self, data, client):
+        msg = '[' + time.ctime()+ '] ' + self.roomname + '-' + self.sock_name[client] + ': ' + data
+        unit.LOBBY.broadcast(msg)
+        
+    def chatall(self, data, client):
+        msg = '[' + time.ctime()+ '] ' + '所有人' + '-' + self.sock_name[client] + ': ' + data
+        unit.USERS.broadcast(msg)
+        
+    def exit(self, data, client):
+        msg = self.sock_name[client] + ' exit'
+        print msg
+        self.broadcast(msg)
+        client.close()
+        self.delete_client(client)
+            
     def add_client(self, client, username):
         self.name_sock[username] = client
         self.sock_name[client] = username
@@ -74,6 +126,7 @@ class unit(object):
         
     def run(self):
         thread = threading.Thread(target=self.listen, args=())
+        thread.daemon = True
         thread.start()        
     
     def listen(self):
@@ -86,26 +139,79 @@ class unit(object):
             for c in readyInput:
                 try:
                     data = c.recv(buf_size)
+                    self.process(data, c)
                 except:
+                    c.close()
                     self.delete_client(c)
-                self.process(data, c)
+                
     
     def broadcast(self, msg):
         for sock in self.name_sock.itervalues():
             sock.send(msg)
             
-    def process(self, data, c):
+    def process(self, data, client):
+        if len(data) == 0:
+            client.close()
+            self.delete_client(client)
+            return
+        
         if data[0] == '$':
-            pass
+            self.process_cmd(data, client)
         elif data[0] == '\\':
             pass
         else:
-            msg = '[' + time.ctime()+ ']' + self.sock_name[c] + ': ' + data
+            msg = '[' + time.ctime()+ ']' + self.sock_name[client] + ': ' + data
             self.broadcast(msg)
             
-            
+    
+    def process_cmd(self, data, client):
+        pos = data.find(' ')
+        if pos == -1:
+            pos = len(data)
+        cmd = data[1:pos]
+        
+        self.cmd[cmd](data[pos+1:], client)
+        
 class lobby(unit):
+    def __init__(self):
+        super(lobby, self).__init__()
+        self.roomname = '大厅'
+        self.rooms = []
+        
+        self.cmd['showroom'] = self.showroom
+        self.cmd['enterroom'] = self.enterroom
+        self.cmd['createroom'] = self.createroom
+        
+        unit.LOBBY = self
+        unit.USERS = users()
+        
+    def showroom(self, data, client):
+        msg = ''
+        for i, room in enumerate(self.rooms):
+            msg += str(i) + '. ' + room.roomname + '\n'
+        
+        if msg == '':
+            msg = msg_info_no_room
+        client.send(msg)
+        
+    def enterroom(self, data, client):
+        try:
+            num = int(data)
+            self.rooms[num].add_client(client, self.sock_name[client])
+            self.delete_client(client)
+            
+        except ValueError:
+            msg = msg_err_room_num
+            client.send(msg)
+        
+    def createroom(self, data, client):
+        roomname = data
+        self.rooms.append(room(roomname))
+        self.enterroom(str(len(self.rooms)-1), client)
 
+    def register_client(self, client, username, duration):
+        unit.USERS.add_user(username, client, duration)
+        self.add_client(client, username)
         
     def add_client(self, client, name):
         super(lobby, self).add_client(client, name)
@@ -117,12 +223,15 @@ class lobby(unit):
 
 class room(unit):
     def __init__(self, roomname):
-        super(lobby, self).__init__()
+        super(room, self).__init__()
         self.roomname = roomname
         
+    def exitroom(self, data, client):
+        unit.LOBBY.add_client(client, self.sock_name[client])
+        self.delete_client(client)
         
     def add_client(self, client, name):
-        super(lobby, self).add_client(client, name)
+        super(room, self).add_client(client, name)
         msg = msg_welcome_room % name
         self.broadcast(msg)
         

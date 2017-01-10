@@ -11,7 +11,7 @@ host = 'localhost'
 port=8888
 
 LOBBY = lobby()
-LOBBY.run()
+
 
 def usage():
     print """
@@ -31,7 +31,7 @@ for op, value in opts:
 
 def newConnection(client):
     username = welcome(client)
-    LOBBY.add_client(client, username)
+    LOBBY.register_client(client, username, 0)
 
 def main():
 
@@ -44,6 +44,7 @@ def main():
         client,address = sock.accept()  
         print '%s connected' % address[0]
         thread = threading.Thread(target=newConnection, args=(client,))
+        thread.daemon = True
         thread.start()
 
 
