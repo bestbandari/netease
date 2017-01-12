@@ -5,13 +5,11 @@ import threading,getopt,sys,string
 from chat import *
 
 opts, args = getopt.getopt(sys.argv[1:], "hp:m:",["help","port=","max_connection="])
-#设置默认的最大连接数和端口号，在没有使用命令传入参数的时候将使用默认的值
 max_connection=50
 host = 'localhost'
 port=8888
 
 LOBBY = lobby()
-
 
 def usage():
     print """
@@ -30,9 +28,13 @@ for op, value in opts:
 
 
 def newConnection(client):
-    username = welcome(client)
-    LOBBY.register_client(client, username, 0)
-
+    try:
+        username = welcome(client)
+        LOBBY.register_client(client, username)
+    except:
+        pass
+        
+    
 def main():
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  

@@ -10,19 +10,19 @@ addr = (HOST,PORT)
 client = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
 client.connect(addr)
 
-running = True
+running = True 
 
 
 def send_msg(client,th):
     global running
     while running:
+        sys.stdout.write('>')
+        sys.stdout.flush()
         data = raw_input()
         if data == '$exit':
             client.send(data)
-            time.sleep(1)
             client.close()
             running = False
-            th.join(1)
             exit(0)
         
         client.send(data)
@@ -32,7 +32,9 @@ def recv_msg(client):
     while running:
         try:
             data = client.recv(1024)
-            print(data)
+            print '\r' + data
+            sys.stdout.write('>')
+            sys.stdout.flush()
         except:
             client.close()
             running = False
@@ -47,4 +49,9 @@ th2.daemon = True
 th2.start()
 
 while running:
-    time.sleep(1)
+    try:
+        time.sleep(1)
+    except KeyboardInterrupt:
+        client.send('$exit')
+        client.close()
+        running = False
