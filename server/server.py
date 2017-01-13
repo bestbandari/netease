@@ -27,12 +27,13 @@ for op, value in opts:
         sys.exit()
 
 
-def newConnection(client):
+def newConnection(client, address):
     try:
         username = welcome(client)
         LOBBY.register_client(client, username)
     except:
-        pass
+        client.close()
+        print address[0] + ' disconnected'
         
     
 def main():
@@ -45,7 +46,7 @@ def main():
     while True:  
         client,address = sock.accept()  
         print '%s connected' % address[0]
-        thread = threading.Thread(target=newConnection, args=(client,))
+        thread = threading.Thread(target=newConnection, args=(client,address))
         thread.daemon = True
         thread.start()
 

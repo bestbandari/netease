@@ -15,8 +15,8 @@ msg_welcome = 'Welcome to Las Vegas chat room. Please select：\n1.sign in\n2.si
 msg_username= 'Please enter your user name.'
 msg_password= 'Please enter your password.'
 msg_password_again = 'Please confirm your password.'
-msg_auth_fail = 'Your user name and password do not match.'
-msg_signup_success = 'Success! Please login to the Lobby.'
+msg_auth_fail = 'Your user name and password do not match.\n'
+msg_signup_success = 'Success! Please login to the Lobby.\n'
 
 msg_welcome_lobby = 'Welcome %s to Lobby\n'
 msg_welcome_room = 'Welcome %s to our room.'
@@ -34,13 +34,15 @@ msg_info_pos_dura = 'Your location: %s. Your total online time: %s.'
 msg_err_cmd = 'Invalid command: %s.'
 msg_err_room_num = 'Invalid room number.'
 msg_err_21_end = '21 game has ended. Please wait for the next round.'
-msg_err_invalid_input = 'Invalid input, enter again.'
+msg_err_21_played = 'You\'ve played the game once. Please wait for the next round.'
+msg_err_invalid_input = 'Invalid input: %s'
 msg_err_invalid_user = '%s is not online or does not exist.'
 msg_err_empty_msg = 'You send an empty message.'
 msg_err_empty_room_name = 'Room name cannot be empty.'
-msg_err_pass_not_match = 'Passwords do not match. Please try again.'
-msg_err_user_exist = 'Your user name exists. Please enter another name.'
-msg_err_user_logged_in = 'You\'ve logged in. Please log out on the other terminal first.'
+msg_err_exist_room_name = 'Room name exists. Please enter another room name.'
+msg_err_pass_not_match = 'Passwords do not match. Please try again.\n'
+msg_err_user_exist = 'Your user name exists. Please enter another name.\n'
+msg_err_user_logged_in = 'You\'ve logged in. Please log out on the other terminal first.\n'
 
 
 class mydb(object):
@@ -90,7 +92,7 @@ def welcome(client):
             name = login(client)
             
         else:
-            client.send(msg_err_invalid_input)
+            client.send(msg_err_invalid_input % buf)
     return name 
 
 def signup(client):
@@ -193,6 +195,7 @@ class unit(object):
         self.cmd = {}
         self.cmd['help'] = self.help
         self.cmd['info'] = self.info
+        self.cmd['users'] = self.show_users
         self.cmd['chat'] = self.chat
         self.cmd['chatall'] = self.chatall
         self.cmd['exit'] = self.exit
@@ -212,6 +215,13 @@ class unit(object):
         msg = msg_info_pos_dura % (self.roomname, str(duration))
         
         client.send(msg)
+        
+    def show_users(self, data, client):
+        s = []
+        for i, name in enumerate(self.sock_name.itervalues()):
+            s.append(str(i) + '. ' + name)
+        
+        client.send('\n'.join(s))
         
     def chat(self, data, client):
         if len(data) > 0:
@@ -319,6 +329,7 @@ class lobby(unit):
         super(lobby, self).__init__()
         self.roomname = 'Lobby'
         self.rooms = []
+        self.rn = set()
         
         self.cmd['showroom'] = self.showroom
         self.cmd['enterroom'] = self.enterroom
@@ -353,6 +364,12 @@ class lobby(unit):
             return 
         
         roomname = data
+        if roomname in self.rn:
+            msg = build_msg(self.roomname, admin, msg_err_exist_room_name)
+            client.send(msg)    
+            return 
+        
+        self.rn.add(roomname)
         self.rooms.append(room(roomname))
         self.enterroom(str(len(self.rooms)-1), client)
 
@@ -382,27 +399,35 @@ class room(unit):
         self.winner = ''
         self.res = -40
         self.game_end = True
-        threading.Timer(1.0, self.run21game, args=()).start()
+        self.played = set()
+        threading.Timer(60.0, self.run21game, args=()).start()
 
         
     def game21(self, data, client):
+        name = self.sock_name[client]
         if self.game_end:
             msg = build_msg(self.roomname, admin, msg_err_21_end)
             client.send(msg)
             return 
         
+        if name in self.played:
+            msg = build_msg(self.roomname, admin, msg_err_21_played)
+            client.send(msg)
+            return
+        
+        self.played.add(name)
         res, valid = self.parse(data)
         if not valid:
-            msg = build_msg(self.roomname, admin, msg_err_invalid_input)
+            msg = build_msg(self.roomname, admin, msg_err_invalid_input % data)
             client.send(msg)
             return
         else:
             msg = build_msg(self.roomname, admin, msg_info_res_accept % res)
             client.send(msg)
             
-        if res == 21 or self.res < res:
+        if res <= 21 and (res == 21 or self.res < res):
             self.res = res
-            self.winner = self.sock_name[client]
+            self.winner = name
             if res == 21:
                 self.end21game()
 
@@ -420,8 +445,10 @@ class room(unit):
     
     def parse(self, s):
         nums = []
-        oper = set(['+', '-', '*', '/'])
-        for i in xrange(len(s)):
+        oper = set(['+', '-', '*', '/', '(', ')'])
+        i = 0
+        
+        while i < len(s):
             c = s[i]
             if c.isdigit():
                 if i<len(s)-1 and s[i+1].isdigit():
@@ -429,10 +456,10 @@ class room(unit):
                     i+=1
                 else:
                     nums.append(s[i])
-            elif c in oper:
-                continue
-            else:
+            elif c not in oper:
                 return -40, False
+            
+            i += 1
             
         nums = sorted(nums)
         
@@ -461,10 +488,11 @@ class room(unit):
             
     def run21game(self):
         t = time.localtime(time.time())
-        if t.tm_sec == 0 or t.tm_sec == 30:
+        if t.tm_min == 0 or t.tm_min == 30:
             self.winner = ''
             self.res = -40
             self.game_end = False
+            self.played.clear()
             
             threading.Timer(15.0, self.end21game, args=()).start()
             
@@ -473,6 +501,6 @@ class room(unit):
             msg = build_msg(self.roomname, admin, '21 game start: ' + ','.join(self.nums))
             self.broadcast(msg)
         
-        threading.Timer(1.0, self.run21game, args=()).start()
+        threading.Timer(60.0, self.run21game, args=()).start()
         
     
